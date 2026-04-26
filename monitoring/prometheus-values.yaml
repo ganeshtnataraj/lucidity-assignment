@@ -1,0 +1,62 @@
+prometheus:
+  prometheusSpec:
+    retention: 1d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        cpu: 400m
+        memory: 400Mi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+grafana:
+  enabled: true
+  adminPassword: "admin"
+  image:
+    tag: "11.6.1"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      cpu: 200m
+      memory: 200Mi
+  service:
+    type: LoadBalancer
+  grafana.ini:
+    feature_toggles:
+      enable: ""
+  sidecar:
+    dashboards:
+      enabled: true
+    image:
+      tag: "1.28.0"
+
+alertmanager:
+  enabled: false
+
+nodeExporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 30Mi
+    limits:
+      cpu: 100m
+      memory: 50Mi
+
+kubelet:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
