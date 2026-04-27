@@ -157,6 +157,7 @@ jobs:
     name: "Destroy All Resources"
     runs-on: ubuntu-latest
     if: github.event.inputs.action == 'destroy'
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: terraform
