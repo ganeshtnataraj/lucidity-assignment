@@ -1,53 +1,54 @@
 # Lucidity Assignment — AKS Hello World
 
-End-to-end Kubernetes deployment on Azure AKS with Terraform, Helm, Prometheus, Grafana, and GitHub Actions.
+Deploy a FastAPI "Hello World" microservice on Azure AKS with full observability and CI/CD automation.
 
-## Repository Structure
+**Stack:** Terraform · Kubernetes · Helm · Prometheus · Grafana · GitHub Actions
+
+---
+
+## Architecture
 
 ```
-.
-├── app/                          # Python FastAPI microservice
-│   ├── main.py
-│   ├── requirements.txt
-│   └── Dockerfile
-├── terraform/                    # IaC — modular AKS cluster
-│   ├── main.tf                   # root — calls local wrapper modules
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── terraform.tfvars.example
-│   └── modules/
-│       ├── resource_group/       # Azure resource group
-│       ├── network/              # wrapper → Azure/network/azurerm (public)
-│       └── aks/                  # wrapper → Azure/aks/azurerm (public)
-
-├── helm/
-│   └── hello-world/              # Helm chart for the service
-│       ├── Chart.yaml
-│       ├── values.yaml
-│       └── templates/
-│           ├── deployment.yaml
-│           ├── service.yaml
-│           ├── servicemonitor.yaml
-│           └── hpa.yaml
-├── monitoring/
-│   ├── prometheus-values.yaml    # kube-prometheus-stack overrides
-│   ├── hello-world-dashboard.yaml # Grafana dashboard ConfigMap for the app
-│   └── install.sh                # One-shot monitoring installer
-└── .github/workflows/
-    └── ci-cd.yaml                # GitHub Actions pipeline
+GitHub Actions
+  ├── Build & push Docker image → Docker Hub
+  ├── Deploy Prometheus + Grafana (monitoring namespace)
+  └── Deploy Hello World app via Helm (default namespace)
+          │
+          ▼
+    Azure AKS Cluster (2 nodes, k8s 1.33)
+    ├── hello-world (FastAPI, port 8080)
+    │   ├── GET /           → {"message": "Hello World"}
+    │   ├── GET /health     → {"status": "ok"}
+    │   └── GET /metrics    → Prometheus metrics
+    └── Monitoring
+        ├── Prometheus  (scrapes /metrics every 15s)
+        └── Grafana     (pre-built dashboard, LoadBalancer IP)
 ```
+
+---
+
+## Repo Structure
+
+```
+app/                    FastAPI microservice + Dockerfile
+terraform/              AKS cluster provisioning (IaC)
+  └── modules/          resource_group / network / aks
+helm/hello-world/       Kubernetes manifests (Deployment, Service, HPA, ServiceMonitor)
+monitoring/             Prometheus + Grafana setup + pre-built dashboard
+.github/workflows/      CI/CD and Terraform pipelines
+```
+
+---
 
 ## Prerequisites
 
-| Tool | Minimum version |
-|------|----------------|
-| Terraform | 1.5 |
-| Azure CLI (`az`) | 2.50 |
-| kubectl | 1.29 |
-| Helm | 3.14 |
+| Tool | Version |
+|------|---------|
+| Terraform | 1.5+ |
+| Azure CLI | 2.50+ |
+| kubectl | 1.29+ |
+| Helm | 3.14+ |
 | Docker | 20+ |
-
-Log in to Azure before running anything:
 
 ```bash
 az login
@@ -56,149 +57,99 @@ az account set --subscription <SUBSCRIPTION_ID>
 
 ---
 
-## 1 — Provision infrastructure with Terraform
+## Deploy
+
+### 1. Provision Infrastructure
 
 ```bash
 cd terraform
-
-# Copy and fill in your values
-cp terraform.tfvars.example terraform.tfvars
-
+cp terraform.tfvars.example terraform.tfvars   # fill in subscription_id
 terraform init
 terraform plan -out tfplan
 terraform apply tfplan
-```
 
-Terraform creates in order:
-1. Resource group (`lucidity-demo-rg`)
-2. VNet + subnet (`192.168.0.0/16`)
-3. AKS cluster (`lucidity-demo-aks`, k8s 1.33, 1 node `Standard_D2alds_v7`)
-
-Outputs printed after apply:
-```
-aks_cluster_name   = "lucidity-demo-aks"
-kubeconfig_command = "az aks get-credentials ..."
-```
-
-Connect kubectl:
-```bash
+# Connect kubectl
 az aks get-credentials --resource-group lucidity-demo-rg --name lucidity-demo-aks
 kubectl get nodes
 ```
 
-### Key Terraform variables (`terraform.tfvars`)
+Key variables in `terraform.tfvars`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `subscription_id` | — | Your Azure subscription ID |
-| `prefix` | `lucidity-demo` | Prefix for all resource names |
+| `subscription_id` | — | Azure subscription ID |
+| `prefix` | `lucidity-demo` | Prefix for resource names |
 | `location` | `eastus2` | Azure region |
-| `kubernetes_version` | `1.33` | AKS Kubernetes version |
-| `node_count` | `2` | Number of nodes |
-| `node_vm_size` | `Standard_D2alds_v7` | VM size per node |
-| `vnet_address_space` | `192.168.0.0/16` | VNet CIDR |
-| `aks_subnet_prefix` | `192.168.1.0/24` | Subnet CIDR |
+| `node_count` | `2` | AKS node count |
+| `node_vm_size` | `Standard_D2alds_v7` | VM size |
 
----
-
-## 2 — Build & run the microservice locally
-
-```bash
-cd app
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8080
-# GET http://localhost:8080/         → {"message":"Hello World"}
-# GET http://localhost:8080/health   → {"status":"ok"}
-# GET http://localhost:8080/metrics  → Prometheus metrics
-```
-
-Or with Docker:
-```bash
-docker build -t hello-world ./app
-docker run -p 8080:8080 hello-world
-```
-
----
-
-## 3 — Build and push Docker image to Docker Hub
-
-The image is hosted publicly at `ganeshtn91/lucidity-demo-hello-app`.
+### 2. Build & Push Docker Image
 
 ```bash
 docker login --username ganeshtn91
-
-docker buildx build \
-  --platform linux/amd64 \
-  -t ganeshtn91/lucidity-demo-hello-app:latest \
-  --push ./app
+docker buildx build --platform linux/amd64 \
+  -t ganeshtn91/lucidity-demo-hello-app:latest --push ./app
 ```
 
----
-
-## 4 — Deploy with Helm
+### 3. Deploy the App
 
 ```bash
 helm upgrade --install hello-world ./helm/hello-world \
   --namespace default \
-  --set image.repository=ganeshtn91/lucidity-demo-hello-app \
   --set image.tag=latest \
-  --set image.pullPolicy=Always \
-  --set serviceMonitor.enabled=true \
-  --set replicaCount=1
+  --set serviceMonitor.enabled=true
 
-# Get external IP
-kubectl get svc hello-world
+kubectl get svc hello-world   # grab EXTERNAL_IP
 curl http://<EXTERNAL_IP>/
 ```
 
----
-
-## 5 — Install Prometheus & Grafana
+### 4. Install Monitoring
 
 ```bash
-cd monitoring
-chmod +x install.sh
-./install.sh
-```
-
-This deploys `kube-prometheus-stack` into the `monitoring` namespace and exposes Grafana via a LoadBalancer IP.
-
-**Default Grafana credentials:** `admin / admin`
-
-After Grafana is up, the **Hello World FastAPI** dashboard is provisioned automatically via `monitoring/hello-world-dashboard.yaml` — no manual import needed.
-
-To apply the dashboard ConfigMap:
-```bash
+cd monitoring && ./install.sh
 kubectl apply -f monitoring/hello-world-dashboard.yaml
 ```
 
-It appears in Grafana under **Dashboards → Hello World FastAPI** within ~15 seconds.
-
-For additional cluster-level dashboards, import these IDs manually via **Dashboards → New → Import**, selecting **Prometheus** as the datasource:
-
-| ID | Dashboard |
-|----|-----------|
-| 6417 | Kubernetes Cluster |
-| 1860 | Node Exporter Full |
-
-The Hello World `ServiceMonitor` is included in the Helm chart and automatically tells Prometheus to scrape `/metrics` on every pod.
+Grafana opens at the LoadBalancer IP — login `admin / admin`.
+The **Hello World FastAPI** dashboard appears automatically under Dashboards.
 
 ---
 
-## 6 — GitHub Actions CI/CD (optional)
+## CI/CD (GitHub Actions)
 
-The pipeline (`.github/workflows/ci-cd.yaml`) triggers on every push to `main`:
+Both workflows are triggered manually via **Actions → Run workflow**.
 
-1. **Build & push** — builds the Docker image for `linux/amd64` and pushes to ACR with the commit SHA tag
-2. **Deploy** — authenticates to Azure, sets AKS context, runs `helm upgrade --install`
+### `terraform.yml` — Infrastructure
 
-### Required GitHub secret
+Choose `apply` or `destroy` when running.
 
-| Secret | Description |
-|--------|-------------|
-| `DOCKERHUB_USERNAME` | Your Docker Hub username (`ganeshtn91`) |
-| `DOCKERHUB_TOKEN` | Docker Hub access token (generate at hub.docker.com → Account Settings → Security) |
-| `AZURE_CREDENTIALS` | Output of `az ad sp create-for-rbac --sdk-auth` |
+```
+apply  →  Stage 1: fmt + validate
+       →  Stage 2: plan  (saves tfplan artifact)
+       →  Stage 3: apply (provisions AKS cluster on Azure)
+
+destroy → tears down all Azure resources in one step
+```
+
+> On first run it also bootstraps the remote Terraform state bucket in Azure Blob Storage.
+
+### `ci-cd.yml` — Build & Deploy
+
+Runs three jobs in sequence (each waits for the previous to succeed):
+
+```
+Job 1 — build-push:        Build Docker image → push to Docker Hub
+Job 2 — deploy-monitoring: Deploy Prometheus + Grafana via Helm, apply Grafana dashboard
+Job 3 — deploy:            Helm deploy the Hello World app, verify rollout
+```
+
+### Required GitHub Secrets
+
+| Secret | How to get it |
+|--------|--------------|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | Docker Hub → Account Settings → Security |
+| `AZURE_CREDENTIALS` | See below |
 
 ```bash
 az ad sp create-for-rbac \
@@ -208,37 +159,22 @@ az ad sp create-for-rbac \
   --sdk-auth
 ```
 
-Copy the JSON output → GitHub repo → **Settings → Secrets → New secret** → name it `AZURE_CREDENTIALS`.
+Copy the JSON → GitHub repo → **Settings → Secrets → New secret → `AZURE_CREDENTIALS`**
 
 ---
 
-## Tear down (stop all billing)
+## Tear Down
 
 ```bash
-cd terraform
-terraform destroy
+cd terraform && terraform destroy
 ```
 
-Destroys everything: AKS, ACR, VNet, resource group. Cost drops to $0.
-
-## Recreate from scratch
-
-```bash
-cd terraform && terraform apply
-az aks get-credentials --resource-group lucidity-demo-rg --name lucidity-demo-aks
-helm upgrade --install hello-world ./helm/hello-world \
-  --set image.repository=ganeshtn91/lucidity-demo-hello-app \
-  --set image.tag=latest --set image.pullPolicy=Always \
-  --set serviceMonitor.enabled=true --set replicaCount=1
-cd ../monitoring && ./install.sh
-```
+Deletes all Azure resources (AKS, VNet, resource group). Cost drops to $0.
 
 ---
 
-## Known Limitations
+## Notes
 
-- **Terraform state** is local by default. For a team setup, configure a remote backend (Azure Blob Storage) in `terraform/main.tf`.
-- **Grafana password** is hardcoded to `admin` — change it before any real use.
-- **TLS / Ingress** is not configured. The app and Grafana are exposed via Azure LoadBalancer public IPs.
-- Two node cluster (`node_count=2`) is used. Scale down to 1 node to minimise cost (`node_count=1` in `terraform.tfvars` then `terraform apply`).
-- **Grafana** is pinned to `11.6.1` (instead of the latest `13.x`) due to two bugs in the `kube-prometheus-stack` defaults: `k8s-sidecar:2.6.0` has a health-server port conflict (`EADDRINUSE`) that causes the sidecar container to crash-loop, and Grafana 13 introduced k8s-backed unified dashboard storage that repeatedly times out against the API server in this single-tenant setup. Pinning to `11.6.1` with sidecar `1.28.0` resolves both issues.
+- Grafana is pinned to `10.4.3` (sidecar `1.27.5`) — newer versions have a port conflict bug that causes crash-loops in this setup.
+- Grafana password is hardcoded to `admin` — change before any real use.
+- No TLS/Ingress — app and Grafana are exposed via Azure LoadBalancer public IPs.
