@@ -16,7 +16,8 @@ grafana:
   enabled: true
   adminPassword: "admin"
   image:
-    tag: "11.6.1"
+    repository: grafana/grafana
+    tag: "10.4.3"
   resources:
     requests:
       cpu: 50m
@@ -26,14 +27,12 @@ grafana:
       memory: 200Mi
   service:
     type: LoadBalancer
-  grafana.ini:
-    feature_toggles:
-      enable: ""
   sidecar:
     dashboards:
       enabled: true
     image:
-      tag: "1.28.0"
+      repository: kiwigrid/k8s-sidecar
+      tag: "1.27.5"
 
 alertmanager:
   enabled: false
