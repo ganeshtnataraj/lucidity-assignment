@@ -37,51 +37,10 @@ jobs:
           push: true
           tags: ${{ env.IMAGE_NAME }}:latest
 
-  deploy:
-    name: Deploy Hello World App
-    runs-on: ubuntu-latest
-    needs: build-push
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.branch || github.ref }}
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Set AKS context
-        uses: azure/aks-set-context@v3
-        with:
-          resource-group: lucidity-demo-rg
-          cluster-name: lucidity-demo-aks
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: "3.14.0"
-
-      - name: Deploy with Helm
-        run: |
-          helm upgrade --install hello-world ./helm/hello-world \
-            --namespace default \
-            --set image.repository=${{ env.IMAGE_NAME }} \
-            --set image.tag=latest \
-            --set image.pullPolicy=Always \
-            --set serviceMonitor.enabled=true \
-            --set replicaCount=1 \
-            --timeout 5m \
-            --wait
-
-      - name: Verify rollout
-        run: kubectl rollout status deployment/hello-world --namespace default --timeout=3m
-
   deploy-monitoring:
     name: Deploy Prometheus and Grafana
     runs-on: ubuntu-latest
-    needs: deploy
+    needs: build-push
 
     steps:
       - uses: actions/checkout@v4
@@ -136,3 +95,44 @@ jobs:
             sleep 10
           done
           echo "LoadBalancer IP not yet assigned — check 'kubectl get svc -n monitoring'"
+
+  deploy:
+    name: Deploy Hello World App
+    runs-on: ubuntu-latest
+    needs: deploy-monitoring
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: lucidity-demo-rg
+          cluster-name: lucidity-demo-aks
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install hello-world ./helm/hello-world \
+            --namespace default \
+            --set image.repository=${{ env.IMAGE_NAME }} \
+            --set image.tag=latest \
+            --set image.pullPolicy=Always \
+            --set serviceMonitor.enabled=true \
+            --set replicaCount=1 \
+            --timeout 5m \
+            --wait
+
+      - name: Verify rollout
+        run: kubectl rollout status deployment/hello-world --namespace default --timeout=3m
