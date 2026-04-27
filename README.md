@@ -108,9 +108,9 @@ destroy → tears down all Azure resources in one step
 Runs three jobs in sequence (each waits for the previous to succeed):
 
 ```
-Job 1 — build-push:        Build Docker image → push to Docker Hub
+Job 1 — build-push:        Build Docker image → push to Docker Hub (ganeshtn91/lucidity-demo-hello-app:latest)
 Job 2 — deploy-monitoring: Deploy Prometheus + Grafana via Helm, apply Grafana dashboard
-Job 3 — deploy:            Helm deploy the Hello World app, verify rollout
+Job 3 — deploy:            Helm deploy the Hello World app (pulls image from Docker Hub), verify rollout
 ```
 
 ### Required GitHub Secrets
