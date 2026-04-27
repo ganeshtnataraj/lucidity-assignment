@@ -7,6 +7,13 @@ terraform {
       version = "~> 3.100"
     }
   }
+
+  backend "azurerm" {
+    resource_group_name  = "lucidity-tfstate-rg"
+    storage_account_name = "luciditytfstate"
+    container_name       = "tfstate"
+    key                  = "lucidity-demo.terraform.tfstate"
+  }
 }
 
 provider "azurerm" {
