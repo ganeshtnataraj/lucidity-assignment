@@ -35,6 +35,8 @@ module "network" {
   address_space       = var.vnet_address_space
   aks_subnet_prefix   = var.aks_subnet_prefix
   tags                = var.tags
+
+  depends_on = [module.resource_group]
 }
 
 module "aks" {
@@ -47,5 +49,7 @@ module "aks" {
   node_vm_size        = var.node_vm_size
   subnet_id           = module.network.aks_subnet_id
   tags                = var.tags
+
+  depends_on = [module.resource_group]
 }
 
