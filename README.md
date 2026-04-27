@@ -59,59 +59,29 @@ az account set --subscription <SUBSCRIPTION_ID>
 
 ## Deploy
 
-### 1. Provision Infrastructure
+> **Everything is automated via GitHub Actions. No manual steps needed after the one-time setup below.**
 
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars   # fill in subscription_id
-terraform init
-terraform plan -out tfplan
-terraform apply tfplan
+### One-time setup (do this once)
 
-# Connect kubectl
-az aks get-credentials --resource-group lucidity-demo-rg --name lucidity-demo-aks
-kubectl get nodes
+1. Add the required GitHub secrets (see [CI/CD section](#cicd-github-actions) below).
+2. Run `terraform.yml` first — this provisions the AKS cluster.
+3. Once the cluster is ready, run `ci-cd.yml` — this builds and deploys everything.
+
+That's it. The pipelines handle Docker build, Helm deploy, and monitoring setup.
+
+### Pipeline execution order
+
+```
+Step 1 — Run terraform.yml (action: apply)
+         Provisions AKS cluster on Azure
+
+Step 2 — Run ci-cd.yml
+         Builds image → deploys Prometheus/Grafana → deploys Hello World app
 ```
 
-Key variables in `terraform.tfvars`:
+### Tear down
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `subscription_id` | — | Azure subscription ID |
-| `prefix` | `lucidity-demo` | Prefix for resource names |
-| `location` | `eastus2` | Azure region |
-| `node_count` | `2` | AKS node count |
-| `node_vm_size` | `Standard_D2alds_v7` | VM size |
-
-### 2. Build & Push Docker Image
-
-```bash
-docker login --username ganeshtn91
-docker buildx build --platform linux/amd64 \
-  -t ganeshtn91/lucidity-demo-hello-app:latest --push ./app
-```
-
-### 3. Deploy the App
-
-```bash
-helm upgrade --install hello-world ./helm/hello-world \
-  --namespace default \
-  --set image.tag=latest \
-  --set serviceMonitor.enabled=true
-
-kubectl get svc hello-world   # grab EXTERNAL_IP
-curl http://<EXTERNAL_IP>/
-```
-
-### 4. Install Monitoring
-
-```bash
-cd monitoring && ./install.sh
-kubectl apply -f monitoring/hello-world-dashboard.yaml
-```
-
-Grafana opens at the LoadBalancer IP — login `admin / admin`.
-The **Hello World FastAPI** dashboard appears automatically under Dashboards.
+Run `terraform.yml` with `action: destroy` to delete all Azure resources.
 
 ---
 
@@ -145,11 +115,14 @@ Job 3 — deploy:            Helm deploy the Hello World app, verify rollout
 
 ### Required GitHub Secrets
 
-| Secret | How to get it |
-|--------|--------------|
-| `DOCKERHUB_USERNAME` | Your Docker Hub username |
-| `DOCKERHUB_TOKEN` | Docker Hub → Account Settings → Security |
-| `AZURE_CREDENTIALS` | See below |
+| Secret | Used by | How to get it |
+|--------|---------|--------------|
+| `DOCKERHUB_USERNAME` | ci-cd.yml | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | ci-cd.yml | Docker Hub → Account Settings → Security |
+| `AZURE_CREDENTIALS` | both | JSON from `az ad sp create-for-rbac` (see below) |
+| `AZURE_SUBSCRIPTION_ID` | terraform.yml | Your Azure subscription ID |
+
+**Create an Azure Service Principal** — this gives GitHub Actions a dedicated identity to authenticate with Azure (create/destroy AKS, run deployments). Run this once from your local terminal:
 
 ```bash
 az ad sp create-for-rbac \
@@ -159,17 +132,7 @@ az ad sp create-for-rbac \
   --sdk-auth
 ```
 
-Copy the JSON → GitHub repo → **Settings → Secrets → New secret → `AZURE_CREDENTIALS`**
-
----
-
-## Tear Down
-
-```bash
-cd terraform && terraform destroy
-```
-
-Deletes all Azure resources (AKS, VNet, resource group). Cost drops to $0.
+Copy the entire JSON output → GitHub repo → **Settings → Secrets → New secret → `AZURE_CREDENTIALS`**
 
 ---
 
@@ -178,3 +141,4 @@ Deletes all Azure resources (AKS, VNet, resource group). Cost drops to $0.
 - Grafana is pinned to `10.4.3` (sidecar `1.27.5`) — newer versions have a port conflict bug that causes crash-loops in this setup.
 - Grafana password is hardcoded to `admin` — change before any real use.
 - No TLS/Ingress — app and Grafana are exposed via Azure LoadBalancer public IPs.
+- IPs are printed in the `ci-cd.yml` pipeline output — Grafana IP in **Job 2 (deploy-monitoring)** under the "Print Grafana LoadBalancer IP" step, and the app IP in **Job 3 (deploy)** under the "Verify rollout" step via `kubectl get svc hello-world`.
