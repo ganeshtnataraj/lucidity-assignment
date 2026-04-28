@@ -136,6 +136,39 @@ Copy the entire JSON output → GitHub repo → **Settings → Secrets → New s
 
 ---
 
+## Grafana Dashboards
+
+After deployment, get the IPs from the pipeline output (see Notes below), then open Grafana at `http://<GRAFANA_IP>:3000` (login: `admin` / `admin`).
+
+### Hello World API Dashboard
+
+Navigate to **Dashboards → Hello World FastAPI** (UID: `hello-world-fastapi`).
+
+Panels:
+- **Request Rate** — requests/sec by handler, method, and status
+- **Error Rate (4xx + 5xx)** — error rate in red, filtered by status
+- **P99 / P95 / P50 Latency** — response time percentiles in ms
+- **Avg Response Size** — bytes per handler
+- **Total Requests** — cumulative stat
+- **Process CPU / Resident Memory** — pod-level resource usage
+
+#### Trigger an error rate spike
+
+Hit a non-existent endpoint repeatedly to generate 404s and watch the **Error Rate** panel spike:
+
+```bash
+# Replace <APP_IP> with the hello-world LoadBalancer IP
+for i in $(seq 1 50); do curl -s http://<APP_IP>:8080/does-not-exist; done
+```
+
+Within ~15 seconds (one Prometheus scrape interval) the **Error Rate (4xx + 5xx)** panel will show a spike. The **Request Rate** panel will also reflect the burst of traffic.
+
+### Cluster Details Dashboard
+
+For node-level metrics (CPU, memory, pod counts), navigate to **Dashboards → Kubernetes / Compute Resources / Cluster** (or search for "cluster" in the Dashboards search bar). This dashboard is provisioned automatically by the `kube-prometheus-stack` Helm chart.
+
+---
+
 ## Notes
 
 - Grafana is pinned to `10.4.3` (sidecar `1.27.5`) — newer versions have a port conflict bug that causes crash-loops in this setup.
